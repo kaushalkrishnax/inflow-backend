@@ -1,0 +1,49 @@
+name: Deploy to EC2 on push to main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v3
+
+      - name: Set up SSH key
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Deploy over SSH to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            # Install Node.js if not present
+            if ! command -v node > /dev/null; then
+              curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            fi
+
+            # Clone or pull the repo
+            cd ~
+            if [ ! -d inflow-backend ]; then
+              git clone https://${{ secrets.GH_USER }}:${{ secrets.GH_PASS }}@github.com/${{ secrets.REPO }} inflow-backend
+            else
+              cd inflow-backend
+              git pull https://${{ secrets.GH_USER }}:${{ secrets.GH_PASS }}@github.com/${{ secrets.REPO }}
+            fi
+
+            cd inflow-backend
+
+            # Install dependencies
+            npm install
+
+            # Run build
+            npm run build
+
+            # Restart with PM2
+            pm2 restart all || pm2 start dist/index.js --name inflow-api
+          EOF
